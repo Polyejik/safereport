@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MVP: Report Signing and Verification</title>
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <!-- QRCode.js and jsQR -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+  <style>
+    body { padding-top: 20px; }
+    .panel { border: 1px solid #ddd; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+    .hidden { display: none; }
+    .success { color: green; font-weight: bold; }
+    .error { color: red; font-weight: bold; }
+    #qrcode { margin-top: 15px; }
+    pre { background: #f8f9fa; padding: 10px; }
+    /* Scanner container: a 150×150px square with a turquoise border */
+    .scanner-container {
+      width: 150px;
+      height: 150px;
+      border: 1px solid turquoise;
+      margin-top: 5px;
+      display: none;
+    }
+    .scanner-container video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    /* Row of buttons with 5mm gap */
+    .btn-row {
+      display: flex;
+      align-items: center;
+      gap: 5mm;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4">
+      <li class="nav-item">
+        <a class="nav-link active" href="#" id="navSign" onclick="showPanel('signPanel')">Sign Report</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#" id="navVerify" onclick="showPanel('verifyPanel')">Verify Report</a>
+      </li>
+    </ul>
+
+    <!-- Sign Report Page -->
+    <div id="signPanel" class="panel">
+      <h2>Sign Report</h2>
+      <!-- LOGIN SECTION (new) -->
+      <div id="loginContainer">
+        <h3>Login</h3>
+        <form id="loginForm">
+          <div class="form-group">
+            <label>Username:</label>
+            <input type="text" class="form-control" id="username" placeholder="Enter username" required>
+          </div>
+          <div class="form-group">
+            <label>Password:</label>
+            <input type="password" class="form-control" id="password" placeholder="Enter password" required>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="login()">Login</button>
+        </form>
+      </div>
+      <!-- SIGN REPORT CONTENT (hidden until login) -->
+      <div id="signContent" class="hidden">
+        <div class="form-group">
+          <button type="button" class="btn btn-info" onclick="generateKeyPair()">Generate Key Pair</button>
+        </div>
+        <div id="downloadLinks" class="mb-3 hidden">
+          <a id="downloadPrivKey" href="#" class="btn btn-outline-primary" download="private_key.pem">Download Private Key</a>
+          <a id="downloadPubKey" href="#" class="btn btn-outline-success" download="public_key.pem">Download Public Key</a>
+        </div>
+        <div class="form-group">
+          <label>Load a Results QR image file:</label>
+          <input type="file" class="form-control-file" id="resultsQrFile" accept="image/*">
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary" onclick="startCameraScan('scannerContainerResults')">Scan QR with Camera</button>
+            <button type="button" class="btn btn-secondary" onclick="scanResultsQRFromFile()">Load and Scan Results QR</button>
+          </div>
+          <div id="scannerContainerResults" class="scanner-container"></div>
+        </div>
+        <div id="qrOutput" class="alert alert-info hidden"></div>
+        <form id="signForm">
+          <div class="form-group">
+            <label>Client Name:</label>
+            <input type="text" class="form-control" id="client" placeholder="Enter Client" required>
+          </div>
+          <div class="form-group">
+            <label>As Of Date:</label>
+            <input type="text" class="form-control" id="asOfDate" placeholder="e.g., 31 December 2024" required>
+          </div>
+          <div class="form-group">
+            <label>2P Oil and Condensate Reserves (10^3 mt):</label>
+            <input type="text" class="form-control" id="reserves" placeholder="Enter 2P Reserves" required>
+          </div>
+          <div class="form-group">
+            <label>2P Future Net Revue (10^3 U.S.$):</label>
+            <input type="text" class="form-control" id="fnr" placeholder="Enter 2P FNR" required>
+          </div>
+          <div class="form-group">
+            <label>Load Private Key (pem file):</label>
+            <input type="file" class="form-control-file" id="privKeyFile" accept=".pem">
+            <input type="text" class="form-control mt-2" id="privKeyName" placeholder="Private key file name" readonly>
+          </div>
+          <div class="form-group">
+            <label>Load Public Key (pem file):</label>
+            <input type="file" class="form-control-file" id="pubKeyFile" accept=".pem">
+            <input type="text" class="form-control mt-2" id="pubKeyName" placeholder="Public key file name" readonly>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="signReport()">Sign Report</button>
+        </form>
+        <div id="signResult" class="mt-4 hidden">
+          <h4 class="text-success">✔ Report Signed</h4>
+          <h4>Generated SIGNED QR Code:</h4>
+          <div id="qrcode"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Verify Report Page -->
+    <div id="verifyPanel" class="panel hidden">
+      <h2>Verify Report</h2>
+      <div class="form-group">
+        <label>Load a SIGNED QR image file:</label>
+        <input type="file" class="form-control-file" id="qrFile" accept="image/*">
+        <div class="btn-row">
+          <button type="button" class="btn btn-secondary" onclick="startCameraScan('scannerContainerVerify')">Scan QR with Camera</button>
+          <button type="button" class="btn btn-secondary" onclick="scanQRFromFile()">Load and Scan</button>
+        </div>
+        <div id="scannerContainerVerify" class="scanner-container"></div>
+      </div>
+      <!-- (Optional: Remove the following block if you don't want to display the raw JSON) -->
+      <!--
+      <div id="verifyData" class="mb-3 hidden">
+        <h4>Extracted Data (JSON):</h4>
+        <pre id="verifyJson"></pre>
+      </div>
+      -->
+      <form id="verifyForm" class="mb-3 hidden">
+        <div class="form-group">
+          <label>Client:</label>
+          <input type="text" class="form-control" id="v_client" required>
+        </div>
+        <div class="form-group">
+          <label>As Of Date:</label>
+          <input type="text" class="form-control" id="v_asOfDate" required>
+        </div>
+        <div class="form-group">
+          <label>2P Reserves:</label>
+          <input type="text" class="form-control" id="v_reserves" required>
+        </div>
+        <div class="form-group">
+          <label>2P FNR:</label>
+          <input type="text" class="form-control" id="v_fnr" required>
+        </div>
+      </form>
+      <button type="button" class="btn btn-primary hidden" id="verifyBtn" onclick="verifyReport()">Verify Report</button>
+      <div id="verifyResult" class="mt-4 hidden">
+        <h4>Verification Result:</h4>
+        <div id="resultMessage"></div>
+        <div id="contactForm" class="mt-3 hidden">
+          <h5>Contact Report Issuer</h5>
+          <form onsubmit="sendContact(event)">
+            <div class="form-group">
+              <label>Issuer Email:</label>
+              <input type="email" class="form-control" id="issuerEmail" value="issuer@example.com" readonly>
+            </div>
+            <div class="form-group">
+              <label>Circumstances:</label>
+              <textarea class="form-control" id="circumstances" placeholder="Describe the circumstances" required></textarea>
+            </div>
+            <div class="form-group">
+              <label>Enter your email:</label>
+              <input type="text" class="form-control" id="contactPerson" placeholder="Enter contact person" required>
+            </div>
+            <button type="submit" class="btn btn-warning">Send Request</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Hidden canvas for capturing video frames -->
+    <div class="hidden">
+      <canvas id="canvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+    /******************************
+     * HELPER FUNCTIONS           *
+     ******************************/
+    function arrayBufferToBase64(buffer) {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return window.btoa(binary);
+    }
+
+    function formatPEM(base64String, header, footer) {
+      const lineSize = 64;
+      let result = header + "\n";
+      for (let i = 0; i < base64String.length; i += lineSize) {
+        result += base64String.substring(i, i + lineSize) + "\n";
+      }
+      result += footer;
+      return result;
+    }
+    
+    async function importPublicKey(pem) {
+      pem = pem.trim();
+      if (!pem.startsWith("-----BEGIN PUBLIC KEY-----")) {
+        pem = "-----BEGIN PUBLIC KEY-----" + pem + "-----END PUBLIC KEY-----";
+      }
+      const header = "-----BEGIN PUBLIC KEY-----";
+      const footer = "-----END PUBLIC KEY-----";
+      const clean = cleanPEM(pem, header, footer);
+      const arrayBuffer = await base64ToArrayBuffer(clean);
+      return crypto.subtle.importKey(
+        "spki",
+        arrayBuffer,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        true,
+        ["verify"]
+      );
+    }
+    
+    function base64ToArrayBuffer(base64) {
+      base64 = base64.replace(/[^A-Za-z0-9+/=]/g, "");
+      try {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+      } catch (e) {
+        throw new Error("Error in atob(): " + e.message + "\nInput string: " + base64);
+      }
+    }
+    
+    function cleanPEM(pem, header, footer) {
+      pem = pem.trim();
+      if (pem.charCodeAt(0) === 0xFEFF) {
+        pem = pem.substring(1);
+      }
+      return pem.replace(header, "").replace(footer, "").replace(/[\r\n\s]/g, "");
+    }
+    
+    /******************************
+     * GLOBAL VARIABLES           *
+     ******************************/
+    window.privKeyContent = "";
+    window.pubKeyContent = "";
+    window.pubKeyContentCompact = "";
+    window.signedData = null;
+    
+    /******************************
+     * KEY FILE LOADING FUNCTIONS *
+     ******************************/
+    function loadKeyFromFile(fileInputId, displayFieldId, globalVarName) {
+      const fileInput = document.getElementById(fileInputId);
+      if (!fileInput.files.length) {
+        alert("No file selected!");
+        return;
+      }
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        window[globalVarName] = e.target.result;
+        document.getElementById(displayFieldId).value = file.name;
+      };
+      reader.readAsText(file);
+    }
+    
+    document.getElementById("privKeyFile").addEventListener("change", function() {
+      loadKeyFromFile("privKeyFile", "privKeyName", "privKeyContent");
+    });
+    document.getElementById("pubKeyFile").addEventListener("change", function() {
+      loadKeyFromFile("pubKeyFile", "pubKeyName", "pubKeyContent");
+    });
+    
+    /******************************
+     * SCANNING FUNCTIONS         *
+     ******************************/
+    let videoStream = null;
+    
+    async function scanResultsQRFromFile() {
+      stopScan();
+      const fileInput = document.getElementById("resultsQrFile");
+      if (!fileInput.files.length) {
+        alert("Please select a Results QR image file.");
+        return;
+      }
+      const file = fileInput.files[0];
+      console.log("Loading Results QR file...");
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        console.log("Results file loaded.");
+        const img = new Image();
+        img.onload = function() {
+          console.log("Results image loaded.");
+          try {
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, canvas.width, canvas.height);
+            if (code) {
+              console.log("Results QR detected:", code.data);
+              document.getElementById("qrOutput").textContent = "QR Data: " + code.data;
+              document.getElementById("qrOutput").classList.remove("hidden");
+              parseResultsQRData(code.data);
+            } else {
+              alert("QR code not recognized in the selected image.");
+            }
+          } catch (error) {
+            console.error("Error processing image:", error);
+            alert("Error processing QR image. Please try again.");
+          }
+        };
+        img.onerror = function() {
+          alert("Failed to load image. Make sure it's a valid image file.");
+        };
+        img.src = e.target.result;
+      };
+      reader.onerror = function() {
+        alert("Error reading the file. Please try again.");
+      };
+      reader.readAsDataURL(file);
+      fileInput.value = "";
+    }
+    
+    function parseResultsQRData(data) {
+      console.log("Parsing Results QR data:", data);
+      const parts = data.trim().split(/;/);
+      if (parts.length >= 4) {
+        document.getElementById("client").value = parts[0].trim();
+        document.getElementById("asOfDate").value = parts[1].trim();
+        document.getElementById("reserves").value = parts[2].trim();
+        document.getElementById("fnr").value = parts[3].trim();
+        console.log("Fields populated successfully.");
+      } else {
+        alert("Invalid Results QR format. Ensure it contains at least four fields separated by semicolons.");
+      }
+    }
+    
+    // Function to scan from file on Verify page
+    function scanQRFromFile() {
+      stopScan();
+      // Hide previous results:
+      // (If you removed the JSON display block, you can also remove these two lines)
+      document.getElementById("verifyResult").classList.add("hidden");
+      // Note: We no longer show the raw JSON
+      const fileInput = document.getElementById("qrFile");
+      if (!fileInput.files.length) {
+        alert("Please select a SIGNED QR image file!");
+        return;
+      }
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.getElementById("canvas");
+          const ctx = canvas.getContext("2d");
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, canvas.width, canvas.height);
+          if (code) {
+            let data = code.data.trim();
+            if (data[0] !== '{') {
+              alert("Loaded SIGNED QR data does not appear to be valid JSON.");
+              return;
+            }
+            // Instead of showing the JSON, we simply use it internally.
+            window.signedData = JSON.parse(data);
+            fillVerifyForm(window.signedData);
+            // Also, show the Verify button if hidden.
+            document.getElementById("verifyBtn").classList.remove("hidden");
+          } else {
+            alert("QR code not recognized in the selected image.");
+          }
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+      fileInput.value = "";
+    }
+    
+    // Function for scanning with camera (used by both pages)
+    function startCameraScan(containerId) {
+      startScan(function(qrData) {
+        if (containerId === "scannerContainerResults") {
+          parseResultsQRData(qrData);
+        } else if (containerId === "scannerContainerVerify") {
+          qrData = qrData.trim();
+          if (qrData[0] !== '{') {
+            alert("Scanned SIGNED QR data does not appear to be valid JSON.");
+            return;
+          }
+          // Do not display the raw JSON; just store it.
+          window.signedData = JSON.parse(qrData);
+          fillVerifyForm(window.signedData);
+          document.getElementById("verifyBtn").classList.remove("hidden");
+        }
+      }, containerId);
+    }
+    
+    async function startScan(callback, containerId) {
+      const container = document.getElementById(containerId);
+      container.style.display = "block";
+      let video = container.querySelector("video");
+      if (!video) {
+        video = document.createElement("video");
+        video.autoplay = true;
+        container.appendChild(video);
+      }
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = videoStream;
+        video.play();
+        video.addEventListener("loadedmetadata", function() {
+          scanLoop(callback);
+        });
+      } catch (err) {
+        alert("Camera access error: " + err);
+      }
+    }
+    
+    function stopScan() {
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+      }
+      const containers = ["scannerContainerResults", "scannerContainerVerify"];
+      containers.forEach(id => {
+        const container = document.getElementById(id);
+        const video = container.querySelector("video");
+        if (video) {
+          container.removeChild(video);
+        }
+        container.style.display = "none";
+      });
+    }
+    
+    function scanLoop(callback) {
+      const video = document.querySelector(".scanner-container[style*='block'] video");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, canvas.width, canvas.height);
+      if (code) {
+        stopScan();
+        callback(code.data);
+      } else {
+        requestAnimationFrame(() => scanLoop(callback));
+      }
+    }
+    
+    /******************************
+     * CRYPTOGRAPHY FUNCTIONS     *
+     ******************************/
+    async function computeHash(text) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(text);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      return bufferToHex(hashBuffer);
+    }
+    
+    function bufferToHex(buffer) {
+      return Array.from(new Uint8Array(buffer))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+    }
+    
+    async function importPrivateKey(pem) {
+      pem = pem.trim();
+      if (pem.includes("-----BEGIN RSA PRIVATE KEY-----")) {
+        alert("Please use a PKCS#8 formatted private key (-----BEGIN PRIVATE KEY-----).");
+        throw new Error("Private key is not in PKCS#8 format.");
+      }
+      const header = "-----BEGIN PRIVATE KEY-----";
+      const footer = "-----END PRIVATE KEY-----";
+      const clean = cleanPEM(pem, header, footer);
+      let arrayBuffer;
+      try {
+        arrayBuffer = await base64ToArrayBuffer(clean);
+      } catch (e) {
+        alert("Error converting private key: " + e);
+        throw e;
+      }
+      return crypto.subtle.importKey(
+        "pkcs8",
+        arrayBuffer,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+    }
+    
+    async function importPublicKey(pem) {
+      pem = pem.trim();
+      const header = "-----BEGIN PUBLIC KEY-----";
+      const footer = "-----END PUBLIC KEY-----";
+      const clean = cleanPEM(pem, header, footer);
+      const arrayBuffer = await base64ToArrayBuffer(clean);
+      return crypto.subtle.importKey(
+        "spki",
+        arrayBuffer,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        true,
+        ["verify"]
+      );
+    }
+    
+    /******************************
+     * SIGN REPORT MODE           *
+     ******************************/
+    async function signReport() {
+      const client = document.getElementById("client").value.trim();
+      const asOfDate = document.getElementById("asOfDate").value.trim();
+      const reserves = document.getElementById("reserves").value.trim();
+      const fnr = document.getElementById("fnr").value.trim();
+      const privKeyPem = window.privKeyContent;
+      const pubKeyCompact = window.pubKeyContentCompact || window.pubKeyContent.replace(/\n/g, "");
+      if (!client || !asOfDate || !reserves || !fnr || !privKeyPem || !pubKeyCompact) {
+        alert("Please fill in all fields and load both key files!");
+        return;
+      }
+      
+      const dataString = client + "|" + asOfDate + "|" + reserves + "|" + fnr;
+      const hashHex = await computeHash(dataString);
+      
+      let privateKey;
+      try {
+        privateKey = await importPrivateKey(privKeyPem);
+      } catch (err) {
+        alert("Error importing private key: " + err);
+        return;
+      }
+      
+      const encoder = new TextEncoder();
+      const hashData = encoder.encode(hashHex);
+      let signatureBuffer;
+      try {
+        signatureBuffer = await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, privateKey, hashData);
+      } catch (err) {
+        alert("Error during signing: " + err);
+        return;
+      }
+      const signatureB64 = window.btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
+      
+      const signedObj = {
+        client: client,
+        as_of_date: asOfDate,
+        reserves: reserves,
+        fnr: fnr,
+        hash: hashHex,
+        signature: signatureB64,
+        publicKey: pubKeyCompact
+      };
+      const signedJson = JSON.stringify(signedObj);
+      document.getElementById("signResult").classList.remove("hidden");
+      document.getElementById("qrcode").innerHTML = "";
+      new QRCode(document.getElementById("qrcode"), { 
+        text: signedJson, 
+        width: 300, 
+        height: 300, 
+        correctLevel: QRCode.CorrectLevel.L 
+      });
+    }
+    
+    /******************************
+     * VERIFY REPORT MODE         *
+     ******************************/
+    async function verifyReport() {
+      if (!window.signedData) {
+        alert("Please load a SIGNED QR code first!");
+        return;
+      }
+      const client = document.getElementById("v_client").value.trim();
+      const asOfDate = document.getElementById("v_asOfDate").value.trim();
+      const reserves = document.getElementById("v_reserves").value.trim();
+      const fnr = document.getElementById("v_fnr").value.trim();
+      const { hash: expectedHash, signature, publicKey } = window.signedData;
+      const dataString = client + "|" + asOfDate + "|" + reserves + "|" + fnr;
+      const computedHash = await computeHash(dataString);
+      if (computedHash !== expectedHash) {
+        displayResult(false, "Computed hash does not match!");
+        return;
+      }
+      let pubKeyObj;
+      try {
+        pubKeyObj = await importPublicKey(publicKey);
+      } catch (err) {
+        displayResult(false, "Error importing public key: " + err);
+        return;
+      }
+      const signatureBuffer = Uint8Array.from(window.atob(signature), c => c.charCodeAt(0));
+      const encoder = new TextEncoder();
+      const hashData = encoder.encode(expectedHash);
+      let valid;
+      try {
+        valid = await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5" }, pubKeyObj, signatureBuffer, hashData);
+      } catch (err) {
+        displayResult(false, "Error verifying signature: " + err);
+        return;
+      }
+      displayResult(valid, valid ? "" : "Signature verification failed.");
+    }
+    
+    function displayResult(valid, msg) {
+      const resultDiv = document.getElementById("resultMessage");
+      if (valid) {
+        resultDiv.innerHTML = "<span class='success'>Proved ✓</span>";
+        document.getElementById("contactForm").classList.add("hidden");
+      } else {
+        resultDiv.innerHTML = "<span class='error'>Alert! ✗ " + msg + "</span>";
+        document.getElementById("contactForm").classList.remove("hidden");
+      }
+      document.getElementById("verifyResult").classList.remove("hidden");
+    }
+    
+    function fillVerifyForm(signedData) {
+      document.getElementById("v_client").value = signedData.client || "";
+      document.getElementById("v_asOfDate").value = signedData.as_of_date || "";
+      document.getElementById("v_reserves").value = signedData.reserves || "";
+      document.getElementById("v_fnr").value = signedData.fnr || "";
+      document.getElementById("verifyForm").classList.remove("hidden");
+    }
+    
+    function sendContact(event) {
+      event.preventDefault();
+      const email = document.getElementById("issuerEmail").value;
+      const circumstances = document.getElementById("circumstances").value;
+      const contact = document.getElementById("contactPerson").value;
+      alert("Request sent to " + email +
+            "\nCircumstances: " + circumstances +
+            "\nContact Person: " + contact);
+    }
+    
+    function showPanel(panelId) {
+      document.getElementById("signPanel").classList.add("hidden");
+      document.getElementById("verifyPanel").classList.add("hidden");
+      document.getElementById(panelId).classList.remove("hidden");
+      document.getElementById("navSign").classList.toggle("active", panelId === "signPanel");
+      document.getElementById("navVerify").classList.toggle("active", panelId === "verifyPanel");
+    }
+    
+    /******************************
+     * LOGIN FUNCTIONS (NEW)      *
+     ******************************/
+    function login() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      if (username === "admin" && password === "321678") {
+        document.getElementById("loginContainer").classList.add("hidden");
+        document.getElementById("signContent").classList.remove("hidden");
+      } else {
+        alert("Incorrect credentials. Please try again.");
+      }
+    }
+    
+    /******************************
+     * KEY GENERATION FUNCTIONS   *
+     ******************************/
+    async function generateKeyPair() {
+      try {
+        const keyPair = await crypto.subtle.generateKey(
+          {
+            name: "RSASSA-PKCS1-v1_5",
+            modulusLength: 2048,
+            publicExponent: new Uint8Array([1, 0, 1]),
+            hash: "SHA-256"
+          },
+          true,
+          ["sign", "verify"]
+        );
+        const privBuffer = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+        const privBase64 = arrayBufferToBase64(privBuffer);
+        const privPEM = formatPEM(privBase64, "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----");
+        const pubBuffer = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+        const pubBase64 = arrayBufferToBase64(pubBuffer);
+        const pubPEM = formatPEM(pubBase64, "-----BEGIN PUBLIC KEY-----", "-----END PUBLIC KEY-----");
+        
+        window.privKeyContent = privPEM;
+        window.pubKeyContent = pubPEM;
+        window.pubKeyContentCompact = pubBase64;
+        
+        // (Optional: remove debug alerts)
+        // alert("Generated Private Key:\n" + privPEM);
+        // alert("Generated Public Key (compact):\n" + pubBase64);
+        
+        const privBlob = new Blob([privPEM], { type: "text/plain" });
+        const pubBlob = new Blob([pubPEM], { type: "text/plain" });
+        const privUrl = URL.createObjectURL(privBlob);
+        const pubUrl = URL.createObjectURL(pubBlob);
+        document.getElementById("downloadPrivKey").href = privUrl;
+        document.getElementById("downloadPubKey").href = pubUrl;
+        document.getElementById("downloadLinks").classList.remove("hidden");
+      } catch (err) {
+        alert("Error generating key pair: " + err);
+      }
+    }
+  </script>
+</body>
+</html>
